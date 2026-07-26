@@ -144,10 +144,8 @@ func (tm *TokenManager) fetchAccessToken(ctx context.Context) (string, time.Time
 		return "", time.Time{}, fmt.Errorf("mpesa: oauth request failed: %w", err)
 	}
 	defer func() {
-	if err := resp.Body.Close(); err != nil {
-		return "", time.Time{}, fmt.Errorf("mpesa: failed to read oauth response: %w", err)
-	}
-}()
+		_ = resp.Body.Close()
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
