@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+	"fmt"
 )
 
 type Client struct {
@@ -43,7 +44,10 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 
 	httpReq.Header.Set("Idempotency-Key", req.IdempotencyKey)
 
-	resp, err := c.httpClient.Do(httpReq)
+	// resp, err := c.httpClient.Do(httpReq)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+}
 	if err != nil {
 		return nil, err
 	}
