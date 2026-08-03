@@ -10,7 +10,12 @@ import (
 	"fmt"
 )
 
-
+type Client struct {
+	baseURL    string
+	httpClient *http.Client
+	passkey    string
+	tokenManager *TokenManager
+}
 
 func NewMpesaClient(
 	baseURL string,
@@ -26,6 +31,7 @@ func NewMpesaClient(
 
 func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushResponse, error) {
 
+	
 	req.Timestamp = generateTimeStamp()
 	req.Password = generatePassword(
 		req.BusinessShortCode,
@@ -50,7 +56,17 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 		return nil, err
 	}
 
+	token, err := c.tokenManager.GetAccessToken(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+
 	httpReq.Header.Set("Idempotency-Key", req.IdempotencyKey)
+
+	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	
