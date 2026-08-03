@@ -5,34 +5,43 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
-	"fmt"
 )
 
+type AccessTokenProvider interface {
+	GetAccessToken(ctx context.Context) (string, error)
+}
+
 type Client struct {
-	baseURL    string
-	httpClient *http.Client
-	passkey    string
-	tokenManager *TokenManager
+	baseURL      string
+	httpClient   *http.Client
+	passkey      string
+	tokenManager AccessTokenProvider
 }
 
 func NewMpesaClient(
 	baseURL string,
 	httpClient *http.Client,
 	passkey string,
+	tokenManager AccessTokenProvider,
 ) *Client {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
 	return &Client{
-		baseURL: baseURL,
-		httpClient: httpClient,
-		passkey: passkey,
+		baseURL:      baseURL,
+		httpClient:   httpClient,
+		passkey:      passkey,
+		tokenManager: tokenManager,
 	}
 }
 
 func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushResponse, error) {
 
-	
-	req.Timestamp = generateTimeStamp()
+	req.Timestamp = generateTimestamp()
 	req.Password = generatePassword(
 		req.BusinessShortCode,
 		c.passkey,
@@ -56,8 +65,11 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 		return nil, err
 	}
 
-	token, err := c.tokenManager.GetAccessToken(ctx)
+	if c.tokenManager == nil {
+		return nil, fmt.Errorf("mpesa: token manager is required")
+	}
 
+	token, err := c.tokenManager.GetAccessToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -69,12 +81,12 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
-	
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-	return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-}
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 	defer func() {
 		//nolint:errcheck
@@ -92,7 +104,7 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 	// req, err := http.NewRequest("POST", "/mpesa/stkpush/v1/processrequest", )
 }
 
-func generateTimeStamp() string {
+func generateTimestamp() string {
 	return time.Now().Format("20060102150405")
 }
 
