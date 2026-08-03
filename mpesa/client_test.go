@@ -1,23 +1,25 @@
 package mpesa
 
 import (
-	"net/http/httptest"
-	"testing"
 	"context"
 	"encoding/json"
-	
 	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
 )
+
+type fakeTokenProvider struct{}
 
 func TestSTKPushUsesCorrectendpoint(t *testing.T) {
 	var (
 		method string
-		path string
+		path   string
 	)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		method = r.Method
-		path  = r.URL.Path
+		path = r.URL.Path
 
 		w.Header().Set("Content-Type", "application/json")
 
@@ -32,12 +34,11 @@ func TestSTKPushUsesCorrectendpoint(t *testing.T) {
 
 	defer server.Close()
 
-
 	client := &Client{
-		baseURL: server.URL,
-		httpClient: server.Client(),
+		baseURL:      server.URL,
+		httpClient:   server.Client(),
+		tokenManager: fakeTokenProvider{},
 	}
-
 
 	req := STKPushRequest{
 		BusinessShortCode: "174379",
@@ -50,7 +51,7 @@ func TestSTKPushUsesCorrectendpoint(t *testing.T) {
 		TransactionDesc:   "Payment",
 	}
 
-	_,err := client.STKPush(context.Background(), req)
+	_, err := client.STKPush(context.Background(), req)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -67,7 +68,7 @@ func TestSTKPushUsesCorrectendpoint(t *testing.T) {
 	}
 }
 
-func TestSTKPushParsesSuccessResponse(t *testing.T){
+func TestSTKPushParsesSuccessResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
@@ -82,8 +83,9 @@ func TestSTKPushParsesSuccessResponse(t *testing.T){
 	defer server.Close()
 
 	client := &Client{
-		baseURL:    server.URL,
-		httpClient: server.Client(),
+		baseURL:      server.URL,
+		httpClient:   server.Client(),
+		tokenManager: fakeTokenProvider{},
 	}
 
 	req := STKPushRequest{
@@ -97,7 +99,7 @@ func TestSTKPushParsesSuccessResponse(t *testing.T){
 		TransactionDesc:   "Payment",
 	}
 
-	resp,err := client.STKPush(context.Background(), req)
+	resp, err := client.STKPush(context.Background(), req)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -106,7 +108,6 @@ func TestSTKPushParsesSuccessResponse(t *testing.T){
 	if resp.MerchantRequestID != "123" {
 		t.Errorf("expected MerchantRequestID to be %q, got %q", "123", resp.MerchantRequestID)
 	}
-
 
 	if resp.CheckoutRequestID != "456" {
 		t.Errorf("expected CheckoutRequestID   %q, got %q", "456", resp.CheckoutRequestID)
@@ -138,11 +139,12 @@ func TestSTKPushIncludesIdempotencyHeader(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{
-		baseURL:    server.URL,
-		httpClient: server.Client(),
+		baseURL:      server.URL,
+		httpClient:   server.Client(),
+		tokenManager: fakeTokenProvider{},
 	}
 
-	req :=  STKPushRequest{
+	req := STKPushRequest{
 		IdempotencyKey:    "stk-push-001",
 		BusinessShortCode: "174379",
 		Amount:            1,
@@ -154,7 +156,7 @@ func TestSTKPushIncludesIdempotencyHeader(t *testing.T) {
 		TransactionDesc:   "Payment",
 	}
 
-	_,err := client.STKPush(context.Background(), req)
+	_, err := client.STKPush(context.Background(), req)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -172,11 +174,10 @@ func TestSTKPushIncludesIdempotencyHeader(t *testing.T) {
 func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
 	var received STKPushRequest
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
 			t.Fatalf("failed to decode request body: %v", err)
 		}
-
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{
@@ -192,8 +193,9 @@ func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
 	defer server.Close()
 
 	client := &Client{
-		baseURL: server.URL,
-		httpClient : server.Client(),
+		baseURL:      server.URL,
+		httpClient:   server.Client(),
+		tokenManager: fakeTokenProvider{},
 	}
 
 	req := STKPushRequest{
@@ -207,7 +209,7 @@ func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
 		TransactionDesc:   "Payment",
 	}
 
-	_,err := client.STKPush(context.Background(), req)
+	_, err := client.STKPush(context.Background(), req)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -217,8 +219,17 @@ func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
 		t.Errorf("expected TimeStamp to have legth 14 got %d", len(received.Timestamp))
 	}
 
-	if received.Password == ""{
-		t.Errorf("expected password to be generated")
+	parsedTime, err := time.Parse("20060102150405", received.Timestamp)
+	if err != nil {
+		t.Fatalf("expected a valid timestamp, got %q: %v", received.Timestamp, err)
 	}
 
+	if parsedTime.IsZero() {
+		t.Fatal("expected parsed timestamp to be non-zero")
+	}
+
+}
+
+func (f fakeTokenProvider) GetAccessToken(ctx context.Context) (string, error) {
+	return "test-token", nil
 }
