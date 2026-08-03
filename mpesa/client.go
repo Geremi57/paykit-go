@@ -3,19 +3,19 @@ package mpesa
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"time"
-	"encoding/base64"
 )
 
 type Client struct {
-	baseURL string
+	baseURL    string
 	httpClient *http.Client
-	passkey string
+	passkey    string
 }
 
-func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushResponse, error){
+func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushResponse, error) {
 
 	req.Timestamp = generateTimeStamp()
 	req.Password = generatePassword(
@@ -24,7 +24,6 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 		req.Timestamp,
 	)
 
-
 	body, err := json.Marshal(req)
 
 	if err != nil {
@@ -32,24 +31,26 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 	}
 
 	httpReq, err := http.NewRequestWithContext(
-		ctx, 
+		ctx,
 		http.MethodPost,
 		c.baseURL+"/mpesa/stkpush/v1/processrequest",
 		bytes.NewReader(body),
 	)
 
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
 
 	httpReq.Header.Set("Idempotency-Key", req.IdempotencyKey)
-
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		//nolint:errcheck
+		resp.Body.Close()
+	}()
 
 	var stkResp STKPushResponse
 
@@ -58,16 +59,15 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 		return nil, err
 	}
 
-
 	return &stkResp, nil
 	// req, err := http.NewRequest("POST", "/mpesa/stkpush/v1/processrequest", )
 }
 
-func generateTimeStamp() string{
+func generateTimeStamp() string {
 	return time.Now().Format("20060102150405")
 }
 
-func generatePassword(shortcode, passkey, timeStamp string) string{
+func generatePassword(shortcode, passkey, timeStamp string) string {
 	raw := shortcode + passkey + timeStamp
 
 	return base64.StdEncoding.EncodeToString([]byte(raw))
