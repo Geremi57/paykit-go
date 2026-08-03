@@ -10,10 +10,18 @@ import (
 	"fmt"
 )
 
-type Client struct {
-	baseURL    string
-	httpClient *http.Client
-	passkey    string
+
+
+func NewMpesaClient(
+	baseURL string,
+	httpClient *http.Client,
+	passkey string,
+) *Client {
+	return &Client{
+		baseURL: baseURL,
+		httpClient: httpClient,
+		passkey: passkey,
+	}
 }
 
 func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushResponse, error) {
@@ -44,7 +52,8 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 
 	httpReq.Header.Set("Idempotency-Key", req.IdempotencyKey)
 
-	// resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.httpClient.Do(httpReq)
+	
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 	return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 }
