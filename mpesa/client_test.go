@@ -215,10 +215,7 @@ func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if received.Timestamp == "" {
-		t.Errorf("expected TimeStamp to have legth 14 got %d", len(received.Timestamp))
-	}
-
+	
 	parsedTime, err := time.Parse("20060102150405", received.Timestamp)
 	if err != nil {
 		t.Fatalf("expected a valid timestamp, got %q: %v", received.Timestamp, err)
