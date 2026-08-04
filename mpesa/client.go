@@ -8,22 +8,27 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/Flying-Tea-Squad/paykit-go"
 )
 
+// AccessTokenProvider supplies OAuth access tokens for M-Pesa API requests.
 type AccessTokenProvider interface {
 	GetAccessToken(ctx context.Context) (string, error)
 }
 
+// Client sends requests to the M-Pesa API.
 type Client struct {
-	baseURL      string
-	httpClient   *http.Client
+	baseURL string
+	paykit.HTTPClient
 	passkey      string
 	tokenManager AccessTokenProvider
 }
 
+// NewMpesaClient creates an M-Pesa API client.
 func NewMpesaClient(
 	baseURL string,
-	httpClient *http.Client,
+	httpClient paykit.HTTPClient,
 	passkey string,
 	tokenManager AccessTokenProvider,
 ) *Client {
@@ -33,14 +38,14 @@ func NewMpesaClient(
 
 	return &Client{
 		baseURL:      baseURL,
-		httpClient:   httpClient,
+		HTTPClient:   httpClient,
 		passkey:      passkey,
 		tokenManager: tokenManager,
 	}
 }
 
+// STKPush sends an STK Push payment request to the M-Pesa API.
 func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushResponse, error) {
-
 	req.Timestamp = generateTimestamp()
 	req.Password = generatePassword(
 		req.BusinessShortCode,
@@ -49,7 +54,6 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 	)
 
 	body, err := json.Marshal(req)
-
 	if err != nil {
 		return nil, err
 	}
@@ -80,18 +84,17 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	resp, err := c.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
-	defer func() {
-		//nolint:errcheck
-		resp.Body.Close()
-	}()
 
 	var stkResp STKPushResponse
 
@@ -101,7 +104,6 @@ func (c *Client) STKPush(ctx context.Context, req STKPushRequest) (*STKPushRespo
 	}
 
 	return &stkResp, nil
-	// req, err := http.NewRequest("POST", "/mpesa/stkpush/v1/processrequest", )
 }
 
 func generateTimestamp() string {

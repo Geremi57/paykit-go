@@ -2,7 +2,9 @@ package mpesa
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,7 +25,7 @@ func TestSTKPushUsesCorrectendpoint(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 		"SellerRequestID": "123",
 		"OutRequestID":"456",
 		"Response":"0",
@@ -36,7 +38,7 @@ func TestSTKPushUsesCorrectendpoint(t *testing.T) {
 
 	client := &Client{
 		baseURL:      server.URL,
-		httpClient:   server.Client(),
+		HTTPClient:   server.Client(),
 		tokenManager: fakeTokenProvider{},
 	}
 
@@ -52,7 +54,6 @@ func TestSTKPushUsesCorrectendpoint(t *testing.T) {
 	}
 
 	_, err := client.STKPush(context.Background(), req)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestSTKPushParsesSuccessResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"MerchantRequestID":"123",
 			"CheckoutRequestID":"456",
 			"ResponseCode":"0",
@@ -84,7 +85,7 @@ func TestSTKPushParsesSuccessResponse(t *testing.T) {
 
 	client := &Client{
 		baseURL:      server.URL,
-		httpClient:   server.Client(),
+		HTTPClient:   server.Client(),
 		tokenManager: fakeTokenProvider{},
 	}
 
@@ -100,7 +101,6 @@ func TestSTKPushParsesSuccessResponse(t *testing.T) {
 	}
 
 	resp, err := client.STKPush(context.Background(), req)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -122,12 +122,16 @@ func TestSTKPushParsesSuccessResponse(t *testing.T) {
 }
 
 func TestSTKPushIncludesIdempotencyHeader(t *testing.T) {
-	var idempotencyKey string
+	var (
+		authorization  string
+		idempotencyKey string
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
 		idempotencyKey = r.Header.Get("Idempotency-Key")
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"MerchantRequestID":"123",
 			"CheckoutRequestID":"456",
 			"ResponseCode":"0",
@@ -140,7 +144,7 @@ func TestSTKPushIncludesIdempotencyHeader(t *testing.T) {
 
 	client := &Client{
 		baseURL:      server.URL,
-		httpClient:   server.Client(),
+		HTTPClient:   server.Client(),
 		tokenManager: fakeTokenProvider{},
 	}
 
@@ -157,7 +161,6 @@ func TestSTKPushIncludesIdempotencyHeader(t *testing.T) {
 	}
 
 	_, err := client.STKPush(context.Background(), req)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -166,12 +169,14 @@ func TestSTKPushIncludesIdempotencyHeader(t *testing.T) {
 		t.Errorf("expected Idempotency-Key header %q, got %q", "stk-push-001", idempotencyKey)
 	}
 
-	// if idempotencyKey != "stk-push-001" {
-	// 	t.Errorf("expected Idempotency-Key header %q, got %q", "stk-push-001", idempotencyKey)
-	// }
+	if authorization != "Bearer test-token" {
+		t.Errorf("expected Authorization header %q, got %q", "Bearer test-token", authorization)
+	}
 }
 
 func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
+	const passkey = "known-passkey"
+
 	var received STKPushRequest
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -180,21 +185,21 @@ func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{
+		_, _ = w.Write([]byte(`{
 			"MerchantRequestID":"123",
 			"CheckoutRequestID":"456",
 			"ResponseCode":"0",
 			"ResponseDescription":"Success",
 			"CustomerMessage":"Accepted"
 		}`))
-
 	}))
 
 	defer server.Close()
 
 	client := &Client{
 		baseURL:      server.URL,
-		httpClient:   server.Client(),
+		HTTPClient:   server.Client(),
+		passkey:      passkey,
 		tokenManager: fakeTokenProvider{},
 	}
 
@@ -210,12 +215,10 @@ func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
 	}
 
 	_, err := client.STKPush(context.Background(), req)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	
 	parsedTime, err := time.Parse("20060102150405", received.Timestamp)
 	if err != nil {
 		t.Fatalf("expected a valid timestamp, got %q: %v", received.Timestamp, err)
@@ -225,6 +228,47 @@ func TestSTKPushGeneratesTimestampPassword(t *testing.T) {
 		t.Fatal("expected parsed timestamp to be non-zero")
 	}
 
+	wantPassword := base64.StdEncoding.EncodeToString([]byte(
+		req.BusinessShortCode + passkey + received.Timestamp,
+	))
+	if received.Password != wantPassword {
+		t.Errorf("expected password %q, got %q", wantPassword, received.Password)
+	}
+}
+
+func TestSTKPushReturnsErrorForNon2xxResponse(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+	}{
+		{name: "client error", statusCode: http.StatusBadRequest},
+		{name: "server error", statusCode: http.StatusInternalServerError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.statusCode)
+			}))
+			defer server.Close()
+
+			client := &Client{
+				baseURL:      server.URL,
+				HTTPClient:   server.Client(),
+				tokenManager: fakeTokenProvider{},
+			}
+
+			resp, err := client.STKPush(context.Background(), STKPushRequest{})
+			if resp != nil {
+				t.Fatalf("expected nil response, got %#v", resp)
+			}
+
+			wantErr := fmt.Sprintf("unexpected status code: %d", tt.statusCode)
+			if err == nil || err.Error() != wantErr {
+				t.Fatalf("expected error %q, got %v", wantErr, err)
+			}
+		})
+	}
 }
 
 func (f fakeTokenProvider) GetAccessToken(ctx context.Context) (string, error) {
